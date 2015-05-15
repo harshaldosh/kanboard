@@ -20,8 +20,8 @@ class Analytic extends Base
      */
     private function layout($template, array $params)
     {
-        $params['board_selector'] = $this->projectPermission->getAllowedProjects($this->acl->getUserId());
-        $params['analytic_content_for_layout'] = $this->template->load($template, $params);
+        $params['board_selector'] = $this->projectPermission->getAllowedProjects($this->userSession->getId());
+        $params['analytic_content_for_layout'] = $this->template->render($template, $params);
 
         return $this->template->layout('analytic/layout', $params);
     }
@@ -122,6 +122,48 @@ class Analytic extends Base
                 'date_format' => $this->config->get('application_date_format'),
                 'date_formats' => $this->dateParser->getAvailableFormats(),
                 'title' => t('Cumulative flow diagram for "%s"', $project['name']),
+            )));
+        }
+    }
+
+    /**
+     * Show burndown chart
+     *
+     * @access public
+     */
+    public function burndown()
+    {
+        $project = $this->getProject();
+        $values = $this->request->getValues();
+
+        $from = $this->request->getStringParam('from', date('Y-m-d', strtotime('-1week')));
+        $to = $this->request->getStringParam('to', date('Y-m-d'));
+
+        if (! empty($values)) {
+            $from = $values['from'];
+            $to = $values['to'];
+        }
+
+        if ($this->request->isAjax()) {
+            $this->response->json(array(
+                'metrics' => $this->projectDailySummary->getRawMetricsByDay($project['id'], $from, $to),
+                'labels' => array(
+                    'day' => t('Date'),
+                    'score' => t('Complexity'),
+                )
+            ));
+        }
+        else {
+            $this->response->html($this->layout('analytic/burndown', array(
+                'values' => array(
+                    'from' => $from,
+                    'to' => $to,
+                ),
+                'display_graph' => $this->projectDailySummary->countDays($project['id'], $from, $to) >= 2,
+                'project' => $project,
+                'date_format' => $this->config->get('application_date_format'),
+                'date_formats' => $this->dateParser->getAvailableFormats(),
+                'title' => t('Burndown chart for "%s"', $project['name']),
             )));
         }
     }

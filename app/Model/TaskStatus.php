@@ -2,6 +2,8 @@
 
 namespace Model;
 
+use Event\TaskEvent;
+
 /**
  * Task Status
  *
@@ -10,6 +12,23 @@ namespace Model;
  */
 class TaskStatus extends Base
 {
+    /**
+     * Return the list of statuses
+     *
+     * @access public
+     * @param  boolean   $prepend  Prepend default value
+     * @return array
+     */
+    public function getList($prepend = false)
+    {
+        $listing = $prepend ? array(-1 => t('All status')) : array();
+
+        return $listing + array(
+            Task::STATUS_OPEN => t('Open'),
+            Task::STATUS_CLOSED => t('Closed'),
+        );
+    }
+
     /**
      * Return true if the task is closed
      *
@@ -84,9 +103,9 @@ class TaskStatus extends Base
                         ));
 
         if ($result) {
-            $this->event->trigger(
+            $this->container['dispatcher']->dispatch(
                 $event,
-                array('task_id' => $task_id) + $this->taskFinder->getById($task_id)
+                new TaskEvent(array('task_id' => $task_id) + $this->taskFinder->getById($task_id))
             );
         }
 

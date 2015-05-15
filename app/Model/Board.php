@@ -24,7 +24,7 @@ class Board extends Base
      * Get Kanboard default columns
      *
      * @access public
-     * @return array
+     * @return string[]
      */
     public function getDefaultColumns()
     {
@@ -47,7 +47,7 @@ class Board extends Base
             $column_name = trim($column_name);
 
             if (! empty($column_name)) {
-                $columns[] = array('title' => $column_name, 'task_limit' => 0);
+                $columns[] = array('title' => $column_name, 'task_limit' => 0, 'description' => '');
             }
         }
 
@@ -73,6 +73,7 @@ class Board extends Base
                 'position' => ++$position,
                 'project_id' => $project_id,
                 'task_limit' => $column['task_limit'],
+                'description' => $column['description'],
             );
 
             if (! $this->db->table(self::TABLE)->save($values)) {
@@ -94,7 +95,7 @@ class Board extends Base
     public function duplicate($project_from, $project_to)
     {
         $columns = $this->db->table(Board::TABLE)
-                            ->columns('title', 'task_limit')
+                            ->columns('title', 'task_limit', 'description')
                             ->eq('project_id', $project_from)
                             ->asc('position')
                             ->findAll();
@@ -109,46 +110,20 @@ class Board extends Base
      * @param  integer   $project_id    Project id
      * @param  string    $title         Column title
      * @param  integer   $task_limit    Task limit
+     * @param  string    $description   Column description
      * @return boolean|integer
      */
-    public function addColumn($project_id, $title, $task_limit = 0)
+    public function addColumn($project_id, $title, $task_limit = 0, $description = '')
     {
         $values = array(
             'project_id' => $project_id,
             'title' => $title,
-            'task_limit' => $task_limit,
+            'task_limit' => intval($task_limit),
             'position' => $this->getLastColumnPosition($project_id) + 1,
+        	'description' => $description,
         );
 
         return $this->persist(self::TABLE, $values);
-    }
-
-    /**
-     * Update columns
-     *
-     * @access public
-     * @param  array    $values   Form values
-     * @return boolean
-     */
-    public function update(array $values)
-    {
-        $columns = array();
-
-        foreach (array('title', 'task_limit') as $field) {
-            foreach ($values[$field] as $column_id => $value) {
-                $columns[$column_id][$field] = $value;
-            }
-        }
-
-        $this->db->startTransaction();
-
-        foreach ($columns as $column_id => $values) {
-            $this->updateColumn($column_id, $values['title'], (int) $values['task_limit']);
-        }
-
-        $this->db->closeTransaction();
-
-        return true;
     }
 
     /**
@@ -158,14 +133,56 @@ class Board extends Base
      * @param  integer   $column_id     Column id
      * @param  string    $title         Column title
      * @param  integer   $task_limit    Task limit
+     * @param  string    $description   Optional description
      * @return boolean
      */
-    public function updateColumn($column_id, $title, $task_limit = 0)
+    public function updateColumn($column_id, $title, $task_limit = 0, $description = '')
     {
         return $this->db->table(self::TABLE)->eq('id', $column_id)->update(array(
             'title' => $title,
-            'task_limit' => $task_limit,
+            'task_limit' => intval($task_limit),
+            'description' => $description,
         ));
+    }
+
+    /**
+     * Get columns with consecutive positions
+     *
+     * If you remove a column, the positions are not anymore consecutives
+     *
+     * @access public
+     * @param  integer  $project_id
+     * @return array
+     */
+    public function getNormalizedColumnPositions($project_id)
+    {
+        $columns = $this->db->hashtable(self::TABLE)->eq('project_id', $project_id)->asc('position')->getAll('id', 'position');
+        $position = 1;
+
+        foreach ($columns as $column_id => $column_position) {
+            $columns[$column_id] = $position++;
+        }
+
+        return $columns;
+    }
+
+    /**
+     * Save the new positions for a set of columns
+     *
+     * @access public
+     * @param  array   $columns    Hashmap of column_id/column_position
+     * @return boolean
+     */
+    public function saveColumnPositions(array $columns)
+    {
+        return $this->db->transaction(function ($db) use ($columns) {
+
+            foreach ($columns as $column_id => $position) {
+                if (! $db->table(Board::TABLE)->eq('id', $column_id)->update(array('position' => $position))) {
+                    return false;
+                }
+            }
+        });
     }
 
     /**
@@ -178,7 +195,7 @@ class Board extends Base
      */
     public function moveDown($project_id, $column_id)
     {
-        $columns = $this->db->table(self::TABLE)->eq('project_id', $project_id)->asc('position')->listing('id', 'position');
+        $columns = $this->getNormalizedColumnPositions($project_id);
         $positions = array_flip($columns);
 
         if (isset($columns[$column_id]) && $columns[$column_id] < count($columns)) {
@@ -186,12 +203,7 @@ class Board extends Base
             $position = ++$columns[$column_id];
             $columns[$positions[$position]]--;
 
-            $this->db->startTransaction();
-            $this->db->table(self::TABLE)->eq('id', $column_id)->update(array('position' => $position));
-            $this->db->table(self::TABLE)->eq('id', $positions[$position])->update(array('position' => $columns[$positions[$position]]));
-            $this->db->closeTransaction();
-
-            return true;
+            return $this->saveColumnPositions($columns);
         }
 
         return false;
@@ -207,7 +219,7 @@ class Board extends Base
      */
     public function moveUp($project_id, $column_id)
     {
-        $columns = $this->db->table(self::TABLE)->eq('project_id', $project_id)->asc('position')->listing('id', 'position');
+        $columns = $this->getNormalizedColumnPositions($project_id);
         $positions = array_flip($columns);
 
         if (isset($columns[$column_id]) && $columns[$column_id] > 1) {
@@ -215,41 +227,79 @@ class Board extends Base
             $position = --$columns[$column_id];
             $columns[$positions[$position]]++;
 
-            $this->db->startTransaction();
-            $this->db->table(self::TABLE)->eq('id', $column_id)->update(array('position' => $position));
-            $this->db->table(self::TABLE)->eq('id', $positions[$position])->update(array('position' => $columns[$positions[$position]]));
-            $this->db->closeTransaction();
-
-            return true;
+            return $this->saveColumnPositions($columns);
         }
 
         return false;
     }
 
     /**
-     * Get all columns and tasks for a given project
+     * Get all tasks sorted by columns and swimlanes
      *
      * @access public
      * @param  integer $project_id Project id
      * @return array
      */
-    public function get($project_id)
+    public function getBoard($project_id)
     {
+        $swimlanes = $this->swimlane->getSwimlanes($project_id);
         $columns = $this->getColumns($project_id);
-        $tasks = $this->taskFinder->getTasksOnBoard($project_id);
+        $nb_columns = count($columns);
 
-        foreach ($columns as &$column) {
+        for ($i = 0, $ilen = count($swimlanes); $i < $ilen; $i++) {
 
-            $column['tasks'] = array();
+            $swimlanes[$i]['columns'] = $columns;
+            $swimlanes[$i]['nb_columns'] = $nb_columns;
+            $swimlanes[$i]['nb_tasks'] = 0;
 
-            foreach ($tasks as &$task) {
-                if ($task['column_id'] == $column['id']) {
-                    $column['tasks'][] = $task;
-                }
+            for ($j = 0; $j < $nb_columns; $j++) {
+                $swimlanes[$i]['columns'][$j]['tasks'] = $this->taskFinder->getTasksByColumnAndSwimlane($project_id, $columns[$j]['id'], $swimlanes[$i]['id']);
+                $swimlanes[$i]['columns'][$j]['nb_tasks'] = count($swimlanes[$i]['columns'][$j]['tasks']);
+                $swimlanes[$i]['columns'][$j]['score'] = $this->getColumnSum($swimlanes[$i]['columns'][$j]['tasks'], 'score');
+                $swimlanes[$i]['nb_tasks'] += $swimlanes[$i]['columns'][$j]['nb_tasks'];
             }
         }
 
-        return $columns;
+        return $swimlanes;
+    }
+
+    /**
+     * Calculate the sum of the defined field for a list of tasks
+     *
+     * @access public
+     * @param  array   $tasks
+     * @param  string  $field
+     * @return integer
+     */
+    public function getColumnSum(array &$tasks, $field)
+    {
+        $sum = 0;
+
+        foreach ($tasks as $task) {
+            $sum += $task['score'];
+        }
+
+        return $sum;
+    }
+
+    /**
+     * Get the total of tasks per column
+     *
+     * @access public
+     * @param  integer   $project_id
+     * @param  boolean   $prepend       Prepend default value
+     * @return array
+     */
+    public function getColumnStats($project_id, $prepend = false)
+    {
+        $listing = $this->db
+                        ->hashtable(Task::TABLE)
+                        ->eq('project_id', $project_id)
+                        ->eq('is_active', 1)
+                        ->groupBy('column_id')
+                        ->getAll('column_id', 'COUNT(*) AS total');
+
+        return $prepend ? array(-1 => t('All columns')) + $listing : $listing;
     }
 
     /**
@@ -265,15 +315,29 @@ class Board extends Base
     }
 
     /**
+     * Get the last column id for a given project
+     *
+     * @access public
+     * @param  integer  $project_id   Project id
+     * @return integer
+     */
+    public function getLastColumn($project_id)
+    {
+        return $this->db->table(self::TABLE)->eq('project_id', $project_id)->desc('position')->findOneColumn('id');
+    }
+
+    /**
      * Get the list of columns sorted by position [ column_id => title ]
      *
      * @access public
      * @param  integer  $project_id   Project id
+     * @param  boolean  $prepend      Prepend a default value
      * @return array
      */
-    public function getColumnsList($project_id)
+    public function getColumnsList($project_id, $prepend = false)
     {
-        return $this->db->table(self::TABLE)->eq('project_id', $project_id)->asc('position')->listing('id', 'title');
+        $listing = $this->db->hashtable(self::TABLE)->eq('project_id', $project_id)->asc('position')->getAll('id', 'title');
+        return $prepend ? array(-1 => t('All columns')) + $listing : $listing;
     }
 
     /**
@@ -344,22 +408,16 @@ class Board extends Base
      * Validate column modification
      *
      * @access public
-     * @param  array   $columns          Original columns List
      * @param  array   $values           Required parameters to update a column
      * @return array   $valid, $errors   [0] = Success or not, [1] = List of errors
      */
-    public function validateModification(array $columns, array $values)
+    public function validateModification(array $values)
     {
-        $rules = array();
-
-        foreach ($columns as $column_id => $column_title) {
-            $rules[] = new Validators\Integer('task_limit['.$column_id.']', t('This value must be an integer'));
-            $rules[] = new Validators\GreaterThan('task_limit['.$column_id.']', t('This value must be greater than %d', 0), 0);
-            $rules[] = new Validators\Required('title['.$column_id.']', t('The title is required'));
-            $rules[] = new Validators\MaxLength('title['.$column_id.']', t('The maximum length is %d characters', 50), 50);
-        }
-
-        $v = new Validator($values, $rules);
+        $v = new Validator($values, array(
+            new Validators\Integer('task_limit', t('This value must be an integer')),
+            new Validators\Required('title', t('The title is required')),
+            new Validators\MaxLength('title', t('The maximum length is %d characters', 50), 50),
+        ));
 
         return array(
             $v->execute(),

@@ -4,7 +4,7 @@
 require __DIR__.'/../app/common.php';
 
 use Model\TaskCreation;
-use Model\SubTask;
+use Model\Subtask;
 use Model\Project;
 use Model\ProjectPermission;
 use Model\User;
@@ -15,13 +15,13 @@ $userModel = new User($container);
 $projectModel = new Project($container);
 $permissionModel = new ProjectPermission($container);
 $taskModel = new TaskCreation($container);
-$subtaskModel = new SubTask($container);
+$subtaskModel = new Subtask($container);
 
 $project_id = $projectModel->create(array(
     'name' => 'Project #1'
 ));
 
-$permissionModel->allowUser($project_id, 1);
+$permissionModel->addMember($project_id, 1);
 
 for ($i = 0; $i <= 5; $i++) {
     $userModel->create(array(

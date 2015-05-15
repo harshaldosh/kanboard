@@ -2,8 +2,7 @@
 
 namespace Auth;
 
-use Core\Request;
-use Core\Security;
+use Event\AuthEvent;
 
 /**
  * ReverseProxy backend
@@ -33,21 +32,13 @@ class ReverseProxy extends Base
             $login = $_SERVER[REVERSE_PROXY_USER_HEADER];
             $user = $this->user->getByUsername($login);
 
-            if (! $user) {
+            if (empty($user)) {
                 $this->createUser($login);
                 $user = $this->user->getByUsername($login);
             }
 
-            // Create the user session
-            $this->user->updateSession($user);
-
-            // Update login history
-            $this->lastLogin->create(
-                self::AUTH_NAME,
-                $user['id'],
-                Request::getIpAddress(),
-                Request::getUserAgent()
-            );
+            $this->userSession->refresh($user);
+            $this->container['dispatcher']->dispatch('auth.success', new AuthEvent(self::AUTH_NAME, $user['id']));
 
             return true;
         }
@@ -75,6 +66,7 @@ class ReverseProxy extends Base
             'username' => $login,
             'is_admin' => REVERSE_PROXY_DEFAULT_ADMIN === $login,
             'is_ldap_user' => 1,
+            'disable_login_form' => 1,
         ));
     }
 }

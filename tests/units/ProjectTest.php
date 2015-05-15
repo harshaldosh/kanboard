@@ -2,6 +2,7 @@
 
 require_once __DIR__.'/Base.php';
 
+use Subscriber\ProjectModificationDateSubscriber;
 use Model\Project;
 use Model\ProjectPermission;
 use Model\User;
@@ -9,6 +10,8 @@ use Model\Task;
 use Model\TaskCreation;
 use Model\Acl;
 use Model\Board;
+use Model\Config;
+use Model\Category;
 
 class ProjectTest extends Base
 {
@@ -27,6 +30,64 @@ class ProjectTest extends Base
         $this->assertEmpty($project['token']);
     }
 
+    public function testCreationWithDefaultCategories()
+    {
+        $p = new Project($this->container);
+        $c = new Config($this->container);
+        $cat = new Category($this->container);
+
+        // Multiple categories correctly formatted
+
+        $this->assertTrue($c->save(array('project_categories' => 'Test1, Test2')));
+        $this->assertEquals(1, $p->create(array('name' => 'UnitTest1')));
+
+        $project = $p->getById(1);
+        $this->assertNotEmpty($project);
+
+        $categories = $cat->getAll(1);
+        $this->assertNotEmpty($categories);
+        $this->assertEquals(2, count($categories));
+        $this->assertEquals('Test1', $categories[0]['name']);
+        $this->assertEquals('Test2', $categories[1]['name']);
+
+        // Single category
+
+        $this->assertTrue($c->save(array('project_categories' => 'Test1')));
+        $this->assertEquals(2, $p->create(array('name' => 'UnitTest2')));
+
+        $project = $p->getById(2);
+        $this->assertNotEmpty($project);
+
+        $categories = $cat->getAll(2);
+        $this->assertNotEmpty($categories);
+        $this->assertEquals(1, count($categories));
+        $this->assertEquals('Test1', $categories[0]['name']);
+
+        // Multiple categories badly formatted
+
+        $this->assertTrue($c->save(array('project_categories' => 'ABC, , DEF 3,  ')));
+        $this->assertEquals(3, $p->create(array('name' => 'UnitTest3')));
+
+        $project = $p->getById(3);
+        $this->assertNotEmpty($project);
+
+        $categories = $cat->getAll(3);
+        $this->assertNotEmpty($categories);
+        $this->assertEquals(2, count($categories));
+        $this->assertEquals('ABC', $categories[0]['name']);
+        $this->assertEquals('DEF 3', $categories[1]['name']);
+
+        // No default categories
+        $this->assertTrue($c->save(array('project_categories' => '  ')));
+        $this->assertEquals(4, $p->create(array('name' => 'UnitTest4')));
+
+        $project = $p->getById(4);
+        $this->assertNotEmpty($project);
+
+        $categories = $cat->getAll(4);
+        $this->assertEmpty($categories);
+    }
+
     public function testUpdateLastModifiedDate()
     {
         $p = new Project($this->container);
@@ -36,14 +97,14 @@ class ProjectTest extends Base
 
         $project = $p->getById(1);
         $this->assertNotEmpty($project);
-        $this->assertEquals($now, $project['last_modified']);
+        $this->assertEquals($now, $project['last_modified'], 'Wrong Timestamp', 1);
 
         sleep(1);
         $this->assertTrue($p->updateModificationDate(1));
 
         $project = $p->getById(1);
         $this->assertNotEmpty($project);
-        $this->assertEquals($now + 1, $project['last_modified']);
+        $this->assertGreaterThan($now, $project['last_modified']);
     }
 
     public function testIsLastModified()
@@ -52,7 +113,6 @@ class ProjectTest extends Base
         $tc = new TaskCreation($this->container);
 
         $now = time();
-        $p->attachEvents();
 
         $this->assertEquals(1, $p->create(array('name' => 'UnitTest')));
 
@@ -62,9 +122,13 @@ class ProjectTest extends Base
 
         sleep(1);
 
+        $listener = new ProjectModificationDateSubscriber($this->container);
+        $this->container['dispatcher']->addListener(Task::EVENT_CREATE_UPDATE, array($listener, 'execute'));
+
         $this->assertEquals(1, $tc->create(array('title' => 'Task #1', 'project_id' => 1)));
-        $this->assertTrue($this->container['event']->isEventTriggered(Task::EVENT_CREATE));
-        $this->assertEquals('Event\ProjectModificationDateListener', $this->container['event']->getLastListenerExecuted());
+
+        $called = $this->container['dispatcher']->getCalledListeners();
+        $this->assertArrayHasKey(Task::EVENT_CREATE_UPDATE.'.Subscriber\ProjectModificationDateSubscriber::execute', $called);
 
         $project = $p->getById(1);
         $this->assertNotEmpty($project);
@@ -138,5 +202,61 @@ class ProjectTest extends Base
         $this->assertEmpty($project['token']);
 
         $this->assertFalse($p->disablePublicAccess(123));
+    }
+
+    public function testIdentifier()
+    {
+        $p = new Project($this->container);
+
+        // Creation
+        $this->assertEquals(1, $p->create(array('name' => 'UnitTest1', 'identifier' => 'test1')));
+        $this->assertEquals(2, $p->create(array('name' => 'UnitTest2')));
+
+        $project = $p->getById(1);
+        $this->assertNotEmpty($project);
+        $this->assertEquals('TEST1', $project['identifier']);
+
+        $project = $p->getById(2);
+        $this->assertNotEmpty($project);
+        $this->assertEquals('', $project['identifier']);
+
+        // Update
+        $this->assertTrue($p->update(array('id' => '2', 'identifier' => 'test2')));
+
+        $project = $p->getById(2);
+        $this->assertNotEmpty($project);
+        $this->assertEquals('TEST2', $project['identifier']);
+
+        $project = $p->getByIdentifier('test1');
+        $this->assertNotEmpty($project);
+        $this->assertEquals('TEST1', $project['identifier']);
+
+        $project = $p->getByIdentifier('');
+        $this->assertFalse($project);
+
+        // Validation rules
+        $r = $p->validateCreation(array('name' => 'test', 'identifier' => 'TEST1'));
+        $this->assertFalse($r[0]);
+
+        $r = $p->validateCreation(array('name' => 'test', 'identifier' => 'test1'));
+        $this->assertFalse($r[0]);
+
+        $r = $p->validateModification(array('id' => 1, 'name' => 'test', 'identifier' => 'TEST1'));
+        $this->assertTrue($r[0]);
+
+        $r = $p->validateModification(array('id' => 1, 'name' => 'test', 'identifier' => 'test3'));
+        $this->assertTrue($r[0]);
+
+        $r = $p->validateModification(array('id' => 1, 'name' => 'test', 'identifier' => ''));
+        $this->assertTrue($r[0]);
+
+        $r = $p->validateModification(array('id' => 1, 'name' => 'test', 'identifier' => 'TEST2'));
+        $this->assertFalse($r[0]);
+
+        $r = $p->validateCreation(array('name' => 'test', 'identifier' => 'a-b-c'));
+        $this->assertFalse($r[0]);
+
+        $r = $p->validateCreation(array('name' => 'test', 'identifier' => 'test 123'));
+        $this->assertFalse($r[0]);
     }
 }

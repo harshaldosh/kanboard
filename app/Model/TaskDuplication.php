@@ -2,6 +2,10 @@
 
 namespace Model;
 
+use DateTime;
+use DateInterval;
+use Event\TaskEvent;
+
 /**
  * Task Duplication
  *
@@ -27,6 +31,12 @@ class TaskDuplication extends Base
         'score',
         'category_id',
         'time_estimated',
+        'swimlane_id',
+        'recurrence_status',
+        'recurrence_trigger',
+        'recurrence_factor',
+        'recurrence_timeframe',
+        'recurrence_basedate',
     );
 
     /**
@@ -39,6 +49,44 @@ class TaskDuplication extends Base
     public function duplicate($task_id)
     {
         return $this->save($task_id, $this->copyFields($task_id));
+    }
+
+    /**
+     * Duplicate recurring task
+     *
+     * @access public
+     * @param  integer             $task_id      Task id
+     * @return boolean|integer                   Recurrence task id
+     */
+    public function duplicateRecurringTask($task_id)
+    {
+        $values = $this->copyFields($task_id);
+
+        if ($values['recurrence_status'] == Task::RECURRING_STATUS_PENDING) {
+
+            $values['recurrence_parent'] = $task_id;
+            $values['column_id'] = $this->board->getFirstColumn($values['project_id']);
+            $this->calculateRecurringTaskDueDate($values);
+
+            $recurring_task_id = $this->save($task_id, $values);
+
+            if ($recurring_task_id > 0) {
+
+                $parent_update = $this->db
+                    ->table(Task::TABLE)
+                    ->eq('id', $task_id)
+                    ->update(array(
+                        'recurrence_status' => Task::RECURRING_STATUS_PROCESSED,
+                        'recurrence_child' => $recurring_task_id,
+                    ));
+
+                if ($parent_update) {
+                    return $recurring_task_id;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -79,10 +127,18 @@ class TaskDuplication extends Base
         $values['position'] = $this->taskFinder->countByColumnId($project_id, $values['column_id']) + 1;
         $values['owner_id'] = $task['owner_id'];
         $values['category_id'] = $task['category_id'];
+        $values['swimlane_id'] = $task['swimlane_id'];
 
         $this->checkDestinationProjectValues($values);
 
-        return $this->db->table(Task::TABLE)->eq('id', $task['id'])->update($values);
+        if ($this->db->table(Task::TABLE)->eq('id', $task['id'])->update($values)) {
+            $this->container['dispatcher']->dispatch(
+                Task::EVENT_MOVE_PROJECT,
+                new TaskEvent(array_merge($task, $values, array('task_id' => $task['id'])))
+            );
+        }
+
+        return true;
     }
 
     /**
@@ -100,8 +156,55 @@ class TaskDuplication extends Base
 
         // Check if the category exists for the destination project
         if ($values['category_id'] > 0) {
-            $category_name = $this->category->getNameById($values['category_id']);
-            $values['category_id'] = $this->category->getIdByName($values['project_id'], $category_name);
+            $values['category_id'] = $this->category->getIdByName(
+                $values['project_id'],
+                $this->category->getNameById($values['category_id'])
+            );
+        }
+
+        // Check if the swimlane exists for the destination project
+        if ($values['swimlane_id'] > 0) {
+            $values['swimlane_id'] = $this->swimlane->getIdByName(
+                $values['project_id'],
+                $this->swimlane->getNameById($values['swimlane_id'])
+            );
+        }
+    }
+
+    /**
+     * Calculate new due date for new recurrence task
+     *
+     * @access public
+     * @param  array   $values   Task fields
+     */
+    public function calculateRecurringTaskDueDate(array &$values)
+    {
+        if (! empty($values['date_due']) && $values['recurrence_factor'] != 0) {
+
+            if ($values['recurrence_basedate'] == Task::RECURRING_BASEDATE_TRIGGERDATE) {
+                $values['date_due'] = time();
+            }
+
+            $factor = abs($values['recurrence_factor']);
+            $subtract = $values['recurrence_factor'] < 0;
+
+            switch ($values['recurrence_timeframe']) {
+                case Task::RECURRING_TIMEFRAME_MONTHS:
+                    $interval = 'P' . $factor . 'M';
+                    break;
+                case Task::RECURRING_TIMEFRAME_YEARS:
+                    $interval = 'P' . $factor . 'Y';
+                    break;
+                default:
+                    $interval = 'P' . $factor . 'D';
+            }
+
+            $date_due = new DateTime();
+            $date_due->setTimestamp($values['date_due']);
+
+            $subtract ? $date_due->sub(new DateInterval($interval)) : $date_due->add(new DateInterval($interval));
+
+            $values['date_due'] = $date_due->getTimestamp();
         }
     }
 
@@ -137,7 +240,7 @@ class TaskDuplication extends Base
         $new_task_id = $this->taskCreation->create($values);
 
         if ($new_task_id) {
-            $this->subTask->duplicate($task_id, $new_task_id);
+            $this->subtask->duplicate($task_id, $new_task_id);
         }
 
         return $new_task_id;

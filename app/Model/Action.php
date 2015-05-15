@@ -2,7 +2,9 @@
 
 namespace Model;
 
-use LogicException;
+use Integration\GitlabWebhook;
+use Integration\GithubWebhook;
+use Integration\BitbucketWebhook;
 use SimpleValidator\Validator;
 use SimpleValidator\Validators;
 
@@ -43,11 +45,15 @@ class Action extends Base
             'TaskAssignCurrentUser' => t('Assign the task to the person who does the action'),
             'TaskDuplicateAnotherProject' => t('Duplicate the task to another project'),
             'TaskMoveAnotherProject' => t('Move the task to another project'),
+            'TaskMoveColumnAssigned' => t('Move the task to another column when assigned to a user'),
+            'TaskMoveColumnUnAssigned' => t('Move the task to another column when assignee is cleared'),
+            'TaskAssignColorColumn' => t('Assign a color when the task is moved to a specific column'),
             'TaskAssignColorUser' => t('Assign a color to a specific user'),
             'TaskAssignColorCategory' => t('Assign automatically a color based on a category'),
             'TaskAssignCategoryColor' => t('Assign automatically a category based on a color'),
             'CommentCreation' => t('Create a comment from an external provider'),
             'TaskCreation' => t('Create a task from an external provider'),
+            'TaskLogMoveAnotherColumn' => t('Add a comment logging moving the task between columns'),
             'TaskAssignUser' => t('Change the assignee based on an external username'),
             'TaskAssignCategoryLabel' => t('Change the category based on an external label'),
         );
@@ -80,6 +86,10 @@ class Action extends Base
             GithubWebhook::EVENT_ISSUE_ASSIGNEE_CHANGE => t('Github issue assignee change'),
             GithubWebhook::EVENT_ISSUE_LABEL_CHANGE => t('Github issue label change'),
             GithubWebhook::EVENT_ISSUE_COMMENT => t('Github issue comment created'),
+            GitlabWebhook::EVENT_COMMIT => t('Gitlab commit received'),
+            GitlabWebhook::EVENT_ISSUE_OPENED => t('Gitlab issue opened'),
+            GitlabWebhook::EVENT_ISSUE_CLOSED => t('Gitlab issue closed'),
+            BitbucketWebhook::EVENT_COMMIT => t('Bitbucket commit received'),
         );
 
         asort($values);
@@ -136,9 +146,17 @@ class Action extends Base
     public function getAll()
     {
         $actions = $this->db->table(self::TABLE)->findAll();
+        $params = $this->db->table(self::TABLE_PARAMS)->findAll();
 
         foreach ($actions as &$action) {
-            $action['params'] = $this->db->table(self::TABLE_PARAMS)->eq('action_id', $action['id'])->findAll();
+
+            $action['params'] = array();
+
+            foreach ($params as $param) {
+                if ($param['action_id'] === $action['id']) {
+                    $action['params'][] = $param;
+                }
+            }
         }
 
         return $actions;
@@ -187,6 +205,7 @@ class Action extends Base
      */
     public function remove($action_id)
     {
+        // $this->container['fileCache']->remove('proxy_action_getAll');
         return $this->db->table(self::TABLE)->eq('id', $action_id)->remove();
     }
 
@@ -195,7 +214,7 @@ class Action extends Base
      *
      * @access public
      * @param  array   $values  Required parameters to save an action
-     * @return bool             Success or not
+     * @return boolean|integer
      */
     public function create(array $values)
     {
@@ -230,7 +249,9 @@ class Action extends Base
 
         $this->db->closeTransaction();
 
-        return true;
+        // $this->container['fileCache']->remove('proxy_action_getAll');
+
+        return $action_id;
     }
 
     /**
@@ -240,7 +261,10 @@ class Action extends Base
      */
     public function attachEvents()
     {
-        foreach ($this->getAll() as $action) {
+        //$actions = $this->container['fileCache']->proxy('action', 'getAll');
+        $actions = $this->getAll();
+
+        foreach ($actions as $action) {
 
             $listener = $this->load($action['action_name'], $action['project_id'], $action['event_name']);
 
@@ -248,7 +272,7 @@ class Action extends Base
                 $listener->setParam($param['name'], $param['value']);
             }
 
-            $this->event->attach($action['event_name'], $listener);
+            $this->container['dispatcher']->addListener($action['event_name'], array($listener, 'execute'));
         }
     }
 
@@ -302,6 +326,8 @@ class Action extends Base
                 }
             }
         }
+
+        // $this->container['fileCache']->remove('proxy_action_getAll');
 
         return true;
     }

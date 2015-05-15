@@ -6,8 +6,11 @@ User settings
 
 To receive email notifications, users of Kanboard must have:
 
-- Activated notifications in the settings page
+- Activated notifications in their profile
 - Have a valid email address in their profile
+- Be member of the project that will trigger notifications
+
+Note: The logged user who performs the action doesn't receive any notifications, only other project members.
 
 Server settings
 ---------------
@@ -19,7 +22,7 @@ However, it's possible to use other methods, the SMTP protocol and Sendmail.
 
 ### SMTP configuration
 
-Create a blank `config.php` file or use the template `config.default.php` and set those values:
+Rename the file `config.default.php` to `config.php` and change these values:
 
 ```php
 // We choose "smtp" as mail transport
@@ -39,18 +42,6 @@ It's also possible to use a secure connection, TLS or SSL:
 ```php
 define('MAIL_SMTP_ENCRYPTION', 'ssl'); // Valid values are "null", "ssl" or "tls"
 ```
-
-Here an example with Google:
-
-```php
-define('MAIL_SMTP_HOSTNAME', 'smtp.gmail.com');
-define('MAIL_SMTP_PORT', 465);
-define('MAIL_SMTP_USERNAME', 'my_account@gmail.com');
-define('MAIL_SMTP_PASSWORD', 'my google password');
-define('MAIL_SMTP_ENCRYPTION', 'ssl');
-```
-
-To use Google, you might need to allow Kanboard to use your Google account, see ["Allowing less secure apps to access your account"](https://support.google.com/accounts/answer/6010255) and ["My client isn't accepting my username and password"](https://support.google.com/mail/answer/14257).
 
 ### Sendmail configuration
 
@@ -74,7 +65,7 @@ It's not possible to reply to this address.
 You can customize this address by changing the value of the constant `MAIL_FROM` in your config file.
 
 ```php
-define('MAIL_FROM', 'notifications@kanboard.net');
+define('MAIL_FROM', 'kanboard@mydomain.tld');
 ```
 
 That can be useful if your SMTP server configuration doesn't accept the default address.
@@ -90,6 +81,16 @@ Examples:
 - http://myserver/kanboard/
 - http://kanboard.mydomain.com/
 
-Don't forget the ending `/`.
+Don't forget the ending slash `/`.
 
-You need to define that manually because Kanboard can't guess the URL from a command line script and some people have very specific configuration.
+You need to define that manually because Kanboard cannot guess the URL from a command line script and some people have very specific configuration.
+
+Troubleshooting
+---------------
+
+If no emails are send and you are sure that everything is configured correctly:
+
+- Check your spam folder
+- Enable the debug mode and check the debug file `data/debug.log`, you should see the exact error
+- Be sure that your server or your hosting provider allow you to send emails
+- If you use SeLinux, allow PHP to send emails

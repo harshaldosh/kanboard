@@ -20,6 +20,7 @@
 *.rar
 *.tar
 *.zip
+*.phar
 
 # Logs and databases #
 ######################
@@ -54,4 +55,5 @@ Thumbs.db
 ################
 config.php
 data/files
-vendor
+data/cache
+/vendor

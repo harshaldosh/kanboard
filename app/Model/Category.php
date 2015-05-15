@@ -74,6 +74,38 @@ class Category extends Base
     }
 
     /**
+     * Prepare categories to be displayed on the board
+     *
+     * @access public
+     * @param  integer   $project_id
+     * @return array
+     */
+    public function getBoardCategories($project_id)
+    {
+        $descriptions = array();
+
+        $listing = array(
+            -1 => t('All categories'),
+            0 => t('No category'),
+        );
+
+        $categories = $this->db->table(self::TABLE)
+                               ->eq('project_id', $project_id)
+                               ->asc('name')
+                               ->findAll();
+
+        foreach ($categories as $category) {
+            $listing[$category['id']] = $category['name'];
+            $descriptions[$category['id']] = $category['description'];
+        }
+
+        return array(
+            $listing,
+            $descriptions,
+        );
+    }
+
+    /**
      * Return the list of all categories
      *
      * @access public
@@ -84,10 +116,10 @@ class Category extends Base
      */
     public function getList($project_id, $prepend_none = true, $prepend_all = false)
     {
-        $listing = $this->db->table(self::TABLE)
+        $listing = $this->db->hashtable(self::TABLE)
             ->eq('project_id', $project_id)
             ->asc('name')
-            ->listing('id', 'name');
+            ->getAll('id', 'name');
 
         $prepend = array();
 
@@ -118,7 +150,30 @@ class Category extends Base
     }
 
     /**
-     * Create a category
+     * Create default cetegories during project creation (transaction already started in Project::create())
+     *
+     * @access public
+     * @param  integer  $project_id
+     */
+    public function createDefaultCategories($project_id)
+    {
+        $categories = explode(',', $this->config->get('project_categories'));
+
+        foreach ($categories as $category) {
+
+            $category = trim($category);
+
+            if (! empty($category)) {
+                $this->db->table(self::TABLE)->insert(array(
+                    'project_id' => $project_id,
+                    'name' => $category,
+                ));
+            }
+        }
+    }
+
+    /**
+     * Create a category (run inside a transaction)
      *
      * @access public
      * @param  array    $values    Form values

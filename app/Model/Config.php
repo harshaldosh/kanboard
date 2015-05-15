@@ -2,8 +2,6 @@
 
 namespace Model;
 
-use SimpleValidator\Validator;
-use SimpleValidator\Validators;
 use Core\Translator;
 use Core\Security;
 use Core\Session;
@@ -24,27 +22,58 @@ class Config extends Base
     const TABLE = 'settings';
 
     /**
-     * Get available timezones
+     * Get available currencies
      *
      * @access public
      * @return array
      */
-    public function getTimezones()
+    public function getCurrencies()
+    {
+        return array(
+            'USD' => t('USD - US Dollar'),
+            'EUR' => t('EUR - Euro'),
+            'GBP' => t('GBP - British Pound'),
+            'CHF' => t('CHF - Swiss Francs'),
+            'CAD' => t('CAD - Canadian Dollar'),
+            'AUD' => t('AUD - Australian Dollar'),
+            'NZD' => t('NZD - New Zealand Dollar'),
+            'INR' => t('INR - Indian Rupee'),
+            'JPY' => t('JPY - Japanese Yen'),
+            'RSD' => t('RSD - Serbian dinar'),
+            'SEK' => t('SEK - Swedish Krona'),
+        );
+    }
+
+    /**
+     * Get available timezones
+     *
+     * @access public
+     * @param  boolean   $prepend  Prepend a default value
+     * @return array
+     */
+    public function getTimezones($prepend = false)
     {
         $timezones = timezone_identifiers_list();
-        return array_combine(array_values($timezones), $timezones);
+        $listing = array_combine(array_values($timezones), $timezones);
+
+        if ($prepend) {
+            return array('' => t('Application default')) + $listing;
+        }
+
+        return $listing;
     }
 
     /**
      * Get available languages
      *
      * @access public
+     * @param  boolean   $prepend  Prepend a default value
      * @return array
      */
-    public function getLanguages()
+    public function getLanguages($prepend = false)
     {
         // Sorted by value
-        return array(
+        $languages = array(
             'da_DK' => 'Dansk',
             'de_DE' => 'Deutsch',
             'en_US' => 'English',
@@ -52,15 +81,73 @@ class Config extends Base
             'fr_FR' => 'Français',
             'it_IT' => 'Italiano',
             'hu_HU' => 'Magyar',
+            'nl_NL' => 'Nederlands',
             'pl_PL' => 'Polski',
             'pt_BR' => 'Português (Brasil)',
             'ru_RU' => 'Русский',
+            'sr_Latn_RS' => 'Srpski',
             'fi_FI' => 'Suomi',
             'sv_SE' => 'Svenska',
+            'tr_TR' => 'Türkçe',
             'zh_CN' => '中文(简体)',
             'ja_JP' => '日本語',
             'th_TH' => 'ไทย',
         );
+
+        if ($prepend) {
+            return array('' => t('Application default')) + $languages;
+        }
+
+        return $languages;
+    }
+
+    /**
+     * Get javascript language code
+     *
+     * @access public
+     * @return string
+     */
+    public function getJsLanguageCode()
+    {
+        $languages = array(
+            'da_DK' => 'da',
+            'de_DE' => 'de',
+            'en_US' => 'en',
+            'es_ES' => 'es',
+            'fr_FR' => 'fr',
+            'it_IT' => 'it',
+            'hu_HU' => 'hu',
+            'nl_NL' => 'nl',
+            'pl_PL' => 'pl',
+            'pt_BR' => 'pt-br',
+            'ru_RU' => 'ru',
+            'sr_Latn_RS' => 'sr',
+            'fi_FI' => 'fi',
+            'sv_SE' => 'sv',
+            'tr_TR' => 'tr',
+            'zh_CN' => 'zh-cn',
+            'ja_JP' => 'ja',
+            'th_TH' => 'th',
+        );
+
+        $lang = $this->getCurrentLanguage();
+
+        return isset($languages[$lang]) ? $languages[$lang] : 'en';
+    }
+
+    /**
+     * Get current language
+     *
+     * @access public
+     * @return string
+     */
+    public function getCurrentLanguage()
+    {
+        if ($this->userSession->isLogged() && ! empty($this->session['user']['language'])) {
+            return $this->session['user']['language'];
+        }
+
+        return $this->get('application_language', 'en_US');
     }
 
     /**
@@ -78,12 +165,13 @@ class Config extends Base
             return $value ?: $default_value;
         }
 
-        if (! isset($_SESSION['config'][$name])) {
-            $_SESSION['config'] = $this->getAll();
+        // Cache config in session
+        if (! isset($this->session['config'][$name])) {
+            $this->session['config'] = $this->getAll();
         }
 
-        if (! empty($_SESSION['config'][$name])) {
-            return $_SESSION['config'][$name];
+        if (! empty($this->session['config'][$name])) {
+            return $this->session['config'][$name];
         }
 
         return $default_value;
@@ -97,7 +185,7 @@ class Config extends Base
      */
     public function getAll()
     {
-        return $this->db->table(self::TABLE)->listing('option', 'value');
+        return $this->db->hashtable(self::TABLE)->getAll('option', 'value');
     }
 
     /**
@@ -128,7 +216,7 @@ class Config extends Base
      */
     public function reload()
     {
-        $_SESSION['config'] = $this->getAll();
+        $this->session['config'] = $this->getAll();
         $this->setupTranslations();
     }
 
@@ -139,11 +227,22 @@ class Config extends Base
      */
     public function setupTranslations()
     {
-        $language = $this->get('application_language', 'en_US');
+        Translator::load($this->getCurrentLanguage());
+    }
 
-        if ($language !== 'en_US') {
-            Translator::load($language);
+    /**
+     * Get current timezone
+     *
+     * @access public
+     * @return string
+     */
+    public function getCurrentTimezone()
+    {
+        if ($this->userSession->isLogged() && ! empty($this->session['user']['timezone'])) {
+            return $this->session['user']['timezone'];
         }
+
+        return $this->get('application_timezone', 'UTC');
     }
 
     /**
@@ -153,7 +252,7 @@ class Config extends Base
      */
     public function setupTimezone()
     {
-        date_default_timezone_set($this->get('application_timezone', 'UTC'));
+        date_default_timezone_set($this->getCurrentTimezone());
     }
 
     /**

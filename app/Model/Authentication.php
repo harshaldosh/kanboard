@@ -3,7 +3,6 @@
 namespace Model;
 
 use Core\Request;
-use Auth\Database;
 use SimpleValidator\Validator;
 use SimpleValidator\Validators;
 
@@ -36,19 +35,19 @@ class Authentication extends Base
      * Check if the current user is authenticated
      *
      * @access public
-     * @param  string    $controller    Controller
-     * @param  string    $action        Action name
      * @return bool
      */
-    public function isAuthenticated($controller, $action)
+    public function isAuthenticated()
     {
-        // If the action is public we don't need to do any checks
-        if ($this->acl->isPublicAction($controller, $action)) {
-            return true;
-        }
-
         // If the user is already logged it's ok
-        if ($this->acl->isLogged()) {
+        if ($this->userSession->isLogged()) {
+
+            // Check if the user session match an existing user
+            if (! $this->user->exists($this->userSession->getId())) {
+                $this->backend('rememberMe')->destroy($this->userSession->getId());
+                $this->session->close();
+                return false;
+            }
 
             // We update each time the RememberMe cookie tokens
             if ($this->backend('rememberMe')->hasCookie()) {
@@ -118,7 +117,7 @@ class Authentication extends Base
                 if (! empty($values['remember_me'])) {
 
                     $credentials = $this->backend('rememberMe')
-                                        ->create($this->acl->getUserId(), Request::getIpAddress(), Request::getUserAgent());
+                                        ->create($this->userSession->getId(), Request::getIpAddress(), Request::getUserAgent());
 
                     $this->backend('rememberMe')->writeCookie($credentials['token'], $credentials['sequence'], $credentials['expiration']);
                 }

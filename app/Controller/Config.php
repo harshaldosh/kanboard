@@ -20,10 +20,10 @@ class Config extends Base
      */
     private function layout($template, array $params)
     {
-        $params['board_selector'] = $this->projectPermission->getAllowedProjects($this->acl->getUserId());
+        $params['board_selector'] = $this->projectPermission->getAllowedProjects($this->userSession->getId());
         $params['values'] = $this->config->getAll();
         $params['errors'] = array();
-        $params['config_content_for_layout'] = $this->template->load($template, $params);
+        $params['config_content_for_layout'] = $this->template->render($template, $params);
 
         return $this->template->layout('config/layout', $params);
     }
@@ -38,7 +38,14 @@ class Config extends Base
     {
         if ($this->request->isPost()) {
 
-            $values = $this->request->getValues();
+            $values =  $this->request->getValues();
+
+            if ($redirect === 'board') {
+                $values += array('subtask_restriction' => 0, 'subtask_time_tracking' => 0, 'subtask_forecast' => 0);
+            }
+            else if ($redirect === 'integrations') {
+                $values += array('integration_slack_webhook' => 0, 'integration_hipchat' => 0, 'integration_gravatar' => 0, 'integration_jabber' => 0);
+            }
 
             if ($this->config->save($values)) {
                 $this->config->reload();
@@ -94,6 +101,20 @@ class Config extends Base
         $this->response->html($this->layout('config/board', array(
             'default_columns' => implode(', ', $this->board->getDefaultColumns()),
             'title' => t('Settings').' &gt; '.t('Board settings'),
+        )));
+    }
+
+    /**
+     * Display the integration settings page
+     *
+     * @access public
+     */
+    public function integrations()
+    {
+        $this->common('integrations');
+
+        $this->response->html($this->layout('config/integrations', array(
+            'title' => t('Settings').' &gt; '.t('Integrations'),
         )));
     }
 

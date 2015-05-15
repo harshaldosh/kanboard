@@ -3,6 +3,7 @@
 namespace Auth;
 
 use Core\Request;
+use Event\AuthEvent;
 use Core\Security;
 
 /**
@@ -100,15 +101,14 @@ class RememberMe extends Base
                 );
 
                 // Create the session
-                $this->user->updateSession($this->user->getById($record['user_id']));
-                $this->acl->isRememberMe(true);
+                $this->userSession->refresh($this->user->getById($record['user_id']));
 
-                // Update last login infos
-                $this->lastLogin->create(
-                    self::AUTH_NAME,
-                    $this->acl->getUserId(),
-                    Request::getIpAddress(),
-                    Request::getUserAgent()
+                // Do not ask 2FA for remember me session
+                $this->session['2fa_validated'] = true;
+
+                $this->container['dispatcher']->dispatch(
+                    'auth.success',
+                    new AuthEvent(self::AUTH_NAME, $this->userSession->getId())
                 );
 
                 return true;

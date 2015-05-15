@@ -1,5 +1,16 @@
 <?php
 
+// Rename this file to config.php if you want to change the values
+
+// Enable/Disable debug
+define('DEBUG', false);
+
+// Debug file path
+define('DEBUG_FILE', __DIR__.'/data/debug.log');
+
+// Folder for uploaded files, don't forget the trailing slash
+define('FILES_DIR', 'data/files/');
+
 // E-mail address for the "From" header (notifications)
 define('MAIL_FROM', 'notifications@kanboard.local');
 
@@ -30,6 +41,9 @@ define('DB_HOSTNAME', 'localhost');
 
 // Mysql/Postgres database name
 define('DB_NAME', 'kanboard');
+
+// Mysql/Postgres custom port (null = default port)
+define('DB_PORT', null);
 
 // Enable LDAP authentication (false by default)
 define('LDAP_AUTH', false);
@@ -71,6 +85,15 @@ define('LDAP_ACCOUNT_FULLNAME', 'displayname');
 // Name of an attribute of the user account object which should be used as the email of the user.
 define('LDAP_ACCOUNT_EMAIL', 'mail');
 
+// Name of an attribute of the user account object which should be used as the id of the user.
+// Example for ActiveDirectory: 'samaccountname'
+// Example for OpenLDAP: 'uid'
+define('LDAP_ACCOUNT_ID', 'samaccountname');
+
+// By default Kanboard lowercase the ldap username to avoid duplicate users (the database is case sensitive)
+// Set to true if you want to preserve the case
+define('LDAP_USERNAME_CASE_SENSITIVE', false);
+
 // Enable/disable Google authentication
 define('GOOGLE_AUTH', false);
 
@@ -103,3 +126,9 @@ define('REVERSE_PROXY_DEFAULT_DOMAIN', '');
 
 // Enable or disable "Strict-Transport-Security" HTTP header
 define('ENABLE_HSTS', true);
+
+// Enable or disable "X-Frame-Options: DENY" HTTP header
+define('ENABLE_XFRAME', true);
+
+// Escape html inside markdown text
+define('MARKDOWN_ESCAPE_HTML', true);

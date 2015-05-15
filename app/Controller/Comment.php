@@ -20,11 +20,11 @@ class Comment extends Base
     {
         $comment = $this->comment->getById($this->request->getIntegerParam('comment_id'));
 
-        if (! $comment) {
+        if (empty($comment)) {
             $this->notfound();
         }
 
-        if (! $this->acl->isAdminUser() && $comment['user_id'] != $this->acl->getUserId()) {
+        if (! $this->userSession->isAdmin() && $comment['user_id'] != $this->userSession->getId()) {
             $this->response->html($this->template->layout('comment/forbidden', array(
                 'title' => t('Access Forbidden')
             )));
@@ -41,19 +41,29 @@ class Comment extends Base
     public function create(array $values = array(), array $errors = array())
     {
         $task = $this->getTask();
+        $ajax = $this->request->isAjax() || $this->request->getIntegerParam('ajax');
 
         if (empty($values)) {
             $values = array(
-                'user_id' => $this->acl->getUserId(),
+                'user_id' => $this->userSession->getId(),
                 'task_id' => $task['id'],
             );
+        }
+
+        if ($ajax) {
+            $this->response->html($this->template->render('comment/create', array(
+                'values' => $values,
+                'errors' => $errors,
+                'task' => $task,
+                'ajax' => $ajax,
+            )));
         }
 
         $this->response->html($this->taskLayout('comment/create', array(
             'values' => $values,
             'errors' => $errors,
             'task' => $task,
-            'title' => t('Add a comment')
+            'title' => t('Add a comment'),
         )));
     }
 
@@ -66,6 +76,7 @@ class Comment extends Base
     {
         $task = $this->getTask();
         $values = $this->request->getValues();
+        $ajax = $this->request->isAjax() || $this->request->getIntegerParam('ajax');
 
         list($valid, $errors) = $this->comment->validateCreation($values);
 
@@ -78,7 +89,11 @@ class Comment extends Base
                 $this->session->flashError(t('Unable to create your comment.'));
             }
 
-            $this->response->redirect('?controller=task&action=show&task_id='.$task['id'].'#comments');
+            if ($ajax) {
+                $this->response->redirect('?controller=board&action=show&project_id='.$task['project_id']);
+            }
+
+            $this->response->redirect('?controller=task&action=show&task_id='.$task['id'].'&project_id='.$task['project_id'].'#comments');
         }
 
         $this->create($values, $errors);
@@ -125,7 +140,7 @@ class Comment extends Base
                 $this->session->flashError(t('Unable to update your comment.'));
             }
 
-            $this->response->redirect('?controller=task&action=show&task_id='.$task['id'].'#comment-'.$comment['id']);
+            $this->response->redirect('?controller=task&action=show&task_id='.$task['id'].'&project_id='.$task['project_id'].'#comment-'.$comment['id']);
         }
 
         $this->edit($values, $errors);
@@ -166,6 +181,6 @@ class Comment extends Base
             $this->session->flashError(t('Unable to remove this comment.'));
         }
 
-        $this->response->redirect('?controller=task&action=show&task_id='.$task['id'].'#comments');
+        $this->response->redirect('?controller=task&action=show&task_id='.$task['id'].'&project_id='.$task['project_id'].'#comments');
     }
 }

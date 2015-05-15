@@ -1,46 +1,50 @@
 <section id="main">
     <div class="page-header">
-        <?php if (Helper\is_admin()): ?>
+        <?php if ($this->userSession->isAdmin()): ?>
         <ul>
-            <li><i class="fa fa-plus fa-fw"></i><?= Helper\a(t('New user'), 'user', 'create') ?></li>
+            <li><i class="fa fa-plus fa-fw"></i><?= $this->a(t('New user'), 'user', 'create') ?></li>
         </ul>
         <?php endif ?>
     </div>
     <section>
-    <?php if (empty($users)): ?>
+    <?php if ($paginator->isEmpty()): ?>
         <p class="alert"><?= t('No user') ?></p>
     <?php else: ?>
         <table>
             <tr>
-                <th><?= Helper\order(t('Id'), 'id', $pagination) ?></th>
-                <th><?= Helper\order(t('Username'), 'username', $pagination) ?></th>
-                <th><?= Helper\order(t('Name'), 'name', $pagination) ?></th>
-                <th><?= Helper\order(t('Email'), 'email', $pagination) ?></th>
-                <th><?= Helper\order(t('Administrator'), 'is_admin', $pagination) ?></th>
-                <th><?= Helper\order(t('Default project'), 'default_project_id', $pagination) ?></th>
-                <th><?= Helper\order(t('Notifications'), 'notifications_enabled', $pagination) ?></th>
+                <th><?= $paginator->order(t('Id'), 'id') ?></th>
+                <th><?= $paginator->order(t('Username'), 'username') ?></th>
+                <th><?= $paginator->order(t('Name'), 'name') ?></th>
+                <th><?= $paginator->order(t('Email'), 'email') ?></th>
+                <th><?= $paginator->order(t('Administrator'), 'is_admin') ?></th>
+                <th><?= $paginator->order(t('Two factor authentication'), 'twofactor_activated') ?></th>
+                <th><?= $paginator->order(t('Default project'), 'default_project_id') ?></th>
+                <th><?= $paginator->order(t('Notifications'), 'notifications_enabled') ?></th>
                 <th><?= t('External accounts') ?></th>
-                <th><?= Helper\order(t('Account type'), 'is_ldap_user', $pagination) ?></th>
+                <th><?= $paginator->order(t('Account type'), 'is_ldap_user') ?></th>
             </tr>
-            <?php foreach ($users as $user): ?>
+            <?php foreach ($paginator->getCollection() as $user): ?>
             <tr>
                 <td>
-                    <?= Helper\a('#'.$user['id'], 'user', 'show', array('user_id' => $user['id'])) ?>
+                    <?= $this->a('#'.$user['id'], 'user', 'show', array('user_id' => $user['id'])) ?>
                 </td>
                 <td>
-                    <?= Helper\a(Helper\escape($user['username']), 'user', 'show', array('user_id' => $user['id'])) ?>
+                    <?= $this->a($this->e($user['username']), 'user', 'show', array('user_id' => $user['id'])) ?>
                 </td>
                 <td>
-                    <?= Helper\escape($user['name']) ?>
+                    <?= $this->e($user['name']) ?>
                 </td>
                 <td>
-                    <a href="mailto:<?= Helper\escape($user['email']) ?>"><?= Helper\escape($user['email']) ?></a>
+                    <a href="mailto:<?= $this->e($user['email']) ?>"><?= $this->e($user['email']) ?></a>
                 </td>
                 <td>
                     <?= $user['is_admin'] ? t('Yes') : t('No') ?>
                 </td>
                 <td>
-                    <?= (isset($user['default_project_id']) && isset($projects[$user['default_project_id']])) ? Helper\escape($projects[$user['default_project_id']]) : t('None'); ?>
+                    <?= $user['twofactor_activated'] ? t('Yes') : t('No') ?>
+                </td>
+                <td>
+                    <?= (isset($user['default_project_id']) && isset($projects[$user['default_project_id']])) ? $this->e($projects[$user['default_project_id']]) : t('None'); ?>
                 </td>
                 <td>
                     <?php if ($user['notifications_enabled'] == 1): ?>
@@ -66,7 +70,7 @@
             <?php endforeach ?>
         </table>
 
-        <?= Helper\paginate($pagination) ?>
+        <?= $paginator ?>
     <?php endif ?>
     </section>
 </section>

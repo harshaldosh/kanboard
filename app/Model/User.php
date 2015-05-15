@@ -29,6 +29,54 @@ class User extends Base
     const EVERYBODY_ID = -1;
 
     /**
+     * Return true if the user exists
+     *
+     * @access public
+     * @param  integer    $user_id   User id
+     * @return boolean
+     */
+    public function exists($user_id)
+    {
+        return $this->db->table(self::TABLE)->eq('id', $user_id)->count() === 1;
+    }
+
+    /**
+     * Get query to fetch all users
+     *
+     * @access public
+     * @return \PicoDb\Table
+     */
+    public function getQuery()
+    {
+        return $this->db
+                    ->table(self::TABLE)
+                    ->columns(
+                        'id',
+                        'username',
+                        'name',
+                        'email',
+                        'is_admin',
+                        'default_project_id',
+                        'is_ldap_user',
+                        'notifications_enabled',
+                        'google_id',
+                        'github_id',
+                        'twofactor_activated'
+                    );
+    }
+
+    /**
+     * Return the full name
+     *
+     * @param  array    $user   User properties
+     * @return string
+     */
+    public function getFullname(array $user)
+    {
+        return $user['name'] ?: $user['username'];
+    }
+
+    /**
      * Return true is the given user id is administrator
      *
      * @access public
@@ -37,46 +85,12 @@ class User extends Base
      */
     public function isAdmin($user_id)
     {
-        $result = $this->db
+        return $this->userSession->isAdmin() ||  // Avoid SQL query if connected
+               $this->db
                     ->table(User::TABLE)
                     ->eq('id', $user_id)
                     ->eq('is_admin', 1)
-                    ->count();
-
-        return $result > 0;
-    }
-
-    /**
-     * Get the default project from the session
-     *
-     * @access public
-     * @return integer
-     */
-    public function getFavoriteProjectId()
-    {
-        return isset($_SESSION['user']['default_project_id']) ? $_SESSION['user']['default_project_id'] : 0;
-    }
-
-    /**
-     * Get the last seen project from the session
-     *
-     * @access public
-     * @return integer
-     */
-    public function getLastSeenProjectId()
-    {
-        return empty($_SESSION['user']['last_show_project_id']) ? 0 : $_SESSION['user']['last_show_project_id'];
-    }
-
-    /**
-     * Set the last seen project from the session
-     *
-     * @access public
-     * @@param integer    $project_id    Project id
-     */
-    public function storeLastSeenProjectId($project_id)
-    {
-        $_SESSION['user']['last_show_project_id'] = (int) $project_id;
+                    ->count() === 1;
     }
 
     /**
@@ -128,6 +142,22 @@ class User extends Base
     }
 
     /**
+     * Get a specific user by the email address
+     *
+     * @access public
+     * @param  string  $email  Email
+     * @return array
+     */
+    public function getByEmail($email)
+    {
+        if (empty($email)) {
+            return false;
+        }
+
+        return $this->db->table(self::TABLE)->eq('email', $email)->findOne();
+    }
+
+    /**
      * Get all users
      *
      * @access public
@@ -135,54 +165,7 @@ class User extends Base
      */
     public function getAll()
     {
-        return $this->db
-                    ->table(self::TABLE)
-                    ->asc('username')
-                    ->columns(
-                        'id',
-                        'username',
-                        'name',
-                        'email',
-                        'is_admin',
-                        'default_project_id',
-                        'is_ldap_user',
-                        'notifications_enabled',
-                        'google_id',
-                        'github_id'
-                    )
-                    ->findAll();
-    }
-
-    /**
-     * Get all users with pagination
-     *
-     * @access public
-     * @param  integer    $offset        Offset
-     * @param  integer    $limit         Limit
-     * @param  string     $column        Sorting column
-     * @param  string     $direction     Sorting direction
-     * @return array
-     */
-    public function paginate($offset = 0, $limit = 25, $column = 'username', $direction = 'ASC')
-    {
-        return $this->db
-                    ->table(self::TABLE)
-                    ->columns(
-                        'id',
-                        'username',
-                        'name',
-                        'email',
-                        'is_admin',
-                        'default_project_id',
-                        'is_ldap_user',
-                        'notifications_enabled',
-                        'google_id',
-                        'github_id'
-                    )
-                    ->offset($offset)
-                    ->limit($limit)
-                    ->orderBy($column, $direction)
-                    ->findAll();
+        return $this->getQuery()->asc('username')->findAll();
     }
 
     /**
@@ -276,8 +259,8 @@ class User extends Base
         $result = $this->db->table(self::TABLE)->eq('id', $values['id'])->update($values);
 
         // If the user is connected refresh his session
-        if (Session::isOpen() && $_SESSION['user']['id'] == $values['id']) {
-            $this->updateSession();
+        if (Session::isOpen() && $this->userSession->getId() == $values['id']) {
+            $this->userSession->refresh();
         }
 
         return $result;
@@ -315,30 +298,6 @@ class User extends Base
                 return false;
             }
         });
-    }
-
-    /**
-     * Update user session information
-     *
-     * @access public
-     * @param  array  $user  User data
-     */
-    public function updateSession(array $user = array())
-    {
-        if (empty($user)) {
-            $user = $this->getById($_SESSION['user']['id']);
-        }
-
-        if (isset($user['password'])) {
-            unset($user['password']);
-        }
-
-        $user['id'] = (int) $user['id'];
-        $user['default_project_id'] = (int) $user['default_project_id'];
-        $user['is_admin'] = (bool) $user['is_admin'];
-        $user['is_ldap_user'] = (bool) $user['is_ldap_user'];
-
-        $_SESSION['user'] = $user;
     }
 
     /**
@@ -457,7 +416,7 @@ class User extends Base
         if ($v->execute()) {
 
             // Check password
-            if ($this->authentication->authenticate($_SESSION['user']['username'], $values['current_password'])) {
+            if ($this->authentication->authenticate($this->session['user']['username'], $values['current_password'])) {
                 return array(true, array());
             }
             else {

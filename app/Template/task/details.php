@@ -1,7 +1,7 @@
-<div class="task-<?= $task['color_id'] ?> task-show-details">
-    <h2><?= Helper\escape('#'.$task['id'].' '.$task['title']) ?></h2>
+<div class="color-<?= $task['color_id'] ?> task-show-details">
+    <h2><?= $this->e('#'.$task['id'].' '.$task['title']) ?></h2>
     <?php if ($task['score']): ?>
-        <span class="task-score"><?= Helper\escape($task['score']) ?></span>
+        <span class="task-score"><?= $this->e($task['score']) ?></span>
     <?php endif ?>
     <ul>
         <?php if ($task['reference']): ?>
@@ -58,13 +58,14 @@
         </li>
         <li>
             <?= t('Column on the board:') ?>
-            <strong><?= Helper\escape($task['column_title']) ?></strong>
-            (<?= Helper\escape($task['project_name']) ?>)
+            <strong><?= $this->e($task['column_title']) ?></strong>
+            (<?= $this->e($task['project_name']) ?>)
+            <?= dt('since %B %e, %Y at %k:%M %p', $task['date_moved']) ?>
         </li>
-        <li><?= t('Task position:').' '.Helper\escape($task['position']) ?></li>
+        <li><?= t('Task position:').' '.$this->e($task['position']) ?></li>
         <?php if ($task['category_name']): ?>
         <li>
-            <?= t('Category:') ?> <strong><?= Helper\escape($task['category_name']) ?></strong>
+            <?= t('Category:') ?> <strong><?= $this->e($task['category_name']) ?></strong>
         </li>
         <?php endif ?>
         <li>
@@ -76,7 +77,19 @@
         </li>
         <?php if ($project['is_public']): ?>
         <li>
-            <?= Helper\a(t('Public link'), 'task', 'readonly', array('task_id' => $task['id'], 'token' => $project['token']), false, '', '', true) ?>
+            <?= $this->a(t('Public link'), 'task', 'readonly', array('task_id' => $task['id'], 'token' => $project['token']), false, '', '', true) ?>
+        </li>
+        <?php endif ?>
+
+        <?php if (! isset($not_editable) && $task['recurrence_status'] != \Model\Task::RECURRING_STATUS_NONE): ?>
+        <li>
+            <strong><?= t('Recurring information') ?></strong>
+            <?= $this->render('task/recurring_info', array(
+                'task' => $task,
+                'recurrence_trigger_list' => $recurrence_trigger_list,
+                'recurrence_timeframe_list' => $recurrence_timeframe_list,
+                'recurrence_basedate_list' => $recurrence_basedate_list,
+            )) ?>
         </li>
         <?php endif ?>
     </ul>

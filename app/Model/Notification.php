@@ -4,8 +4,6 @@ namespace Model;
 
 use Core\Session;
 use Core\Translator;
-use Core\Template;
-use Event\NotificationListener;
 use Swift_Message;
 use Swift_Mailer;
 use Swift_TransportException;
@@ -29,8 +27,8 @@ class Notification extends Base
      * Get a list of people with notifications enabled
      *
      * @access public
-     * @param  integer   $project_id     Project id
-     * @param  array     $exlude_users   List of user_id to exclude
+     * @param  integer   $project_id      Project id
+     * @param  array     $exclude_users   List of user_id to exclude
      * @return array
      */
     public function getUsersWithNotification($project_id, array $exclude_users = array())
@@ -39,7 +37,7 @@ class Notification extends Base
 
             return $this->db
                         ->table(User::TABLE)
-                        ->columns(User::TABLE.'.id', User::TABLE.'.username', User::TABLE.'.name', User::TABLE.'.email')
+                        ->columns(User::TABLE.'.id', User::TABLE.'.username', User::TABLE.'.name', User::TABLE.'.email', User::TABLE.'.language')
                         ->eq('notifications_enabled', '1')
                         ->neq('email', '')
                         ->notin(User::TABLE.'.id', $exclude_users)
@@ -48,7 +46,7 @@ class Notification extends Base
 
         return $this->db
             ->table(ProjectPermission::TABLE)
-            ->columns(User::TABLE.'.id', User::TABLE.'.username', User::TABLE.'.name', User::TABLE.'.email')
+            ->columns(User::TABLE.'.id', User::TABLE.'.username', User::TABLE.'.name', User::TABLE.'.email', User::TABLE.'.language')
             ->join(User::TABLE, 'id', 'user_id')
             ->eq('project_id', $project_id)
             ->eq('notifications_enabled', '1')
@@ -61,15 +59,15 @@ class Notification extends Base
      * Get the list of users to send the notification for a given project
      *
      * @access public
-     * @param  integer   $project_id     Project id
-     * @param  array     $exlude_users   List of user_id to exclude
+     * @param  integer   $project_id      Project id
+     * @param  array     $exclude_users   List of user_id to exclude
      * @return array
      */
     public function getUsersList($project_id, array $exclude_users = array())
     {
         // Exclude the connected user
-        if (Session::isOpen()) {
-            $exclude_users[] = $this->acl->getUserId();
+        if (Session::isOpen() && $this->userSession->isLogged()) {
+            $exclude_users[] = $this->userSession->getId();
         }
 
         $users = $this->getUsersWithNotification($project_id, $exclude_users);
@@ -94,37 +92,6 @@ class Notification extends Base
     }
 
     /**
-     * Attach events
-     *
-     * @access public
-     */
-    public function attachEvents()
-    {
-        $events = array(
-            Task::EVENT_CREATE => 'task_creation',
-            Task::EVENT_UPDATE => 'task_update',
-            Task::EVENT_CLOSE => 'task_close',
-            Task::EVENT_OPEN => 'task_open',
-            Task::EVENT_MOVE_COLUMN => 'task_move_column',
-            Task::EVENT_MOVE_POSITION => 'task_move_position',
-            Task::EVENT_ASSIGNEE_CHANGE => 'task_assignee_change',
-            SubTask::EVENT_CREATE => 'subtask_creation',
-            SubTask::EVENT_UPDATE => 'subtask_update',
-            Comment::EVENT_CREATE => 'comment_creation',
-            Comment::EVENT_UPDATE => 'comment_update',
-            File::EVENT_CREATE => 'file_creation',
-        );
-
-        foreach ($events as $event_name => $template_name) {
-
-            $listener = new NotificationListener($this->container);
-            $listener->setTemplate($template_name);
-
-            $this->event->attach($event_name, $listener);
-        }
-    }
-
-    /**
      * Send the email notifications
      *
      * @access public
@@ -135,21 +102,55 @@ class Notification extends Base
     public function sendEmails($template, array $users, array $data)
     {
         try {
+
+            $author = '';
+
+            if (Session::isOpen() && $this->userSession->isLogged()) {
+                $author = e('%s via Kanboard', $this->user->getFullname($this->session['user']));
+            }
+
             $mailer = Swift_Mailer::newInstance($this->container['mailer']);
 
-            $message = Swift_Message::newInstance()
-                            ->setSubject($this->getMailSubject($template, $data))
-                            ->setFrom(array(MAIL_FROM => 'Kanboard'))
-                            ->setBody($this->getMailContent($template, $data), 'text/html');
-
             foreach ($users as $user) {
-                $message->setTo(array($user['email'] => $user['name'] ?: $user['username']));
+
+                $this->container['logger']->debug('Send email notification to '.$user['username'].' lang='.$user['language']);
+
+                // Use the user language otherwise use the application language (do not use the session language)
+                if (! empty($user['language'])) {
+                    Translator::load($user['language']);
+                }
+                else {
+                    Translator::load($this->config->get('application_language', 'en_US'));
+                }
+
+                // Send the message
+                $message = Swift_Message::newInstance()
+                            ->setSubject($this->getMailSubject($template, $data))
+                            ->setFrom(array(MAIL_FROM => $author ?: 'Kanboard'))
+                            ->setBody($this->getMailContent($template, $data), 'text/html')
+                            ->setTo(array($user['email'] => $user['name'] ?: $user['username']));
+
                 $mailer->send($message);
             }
         }
         catch (Swift_TransportException $e) {
-            $this->container['logger']->addError($e->getMessage());
+            $this->container['logger']->error($e->getMessage());
         }
+
+        // Restore locales
+        $this->config->setupTranslations();
+    }
+
+    /**
+     * Get the mail subject for a given label
+     *
+     * @access private
+     * @param  string    $label       Label
+     * @param  array     $data        Template data
+     */
+    private function getStandardMailSubject($label, array $data)
+    {
+        return sprintf('[%s][%s] %s (#%d)', $data['task']['project_name'], $label, $data['task']['title'], $data['task']['id']);
     }
 
     /**
@@ -163,40 +164,40 @@ class Notification extends Base
     {
         switch ($template) {
             case 'file_creation':
-                $subject = e('[%s][New attachment] %s (#%d)', $data['task']['project_name'], $data['task']['title'], $data['task']['id']);
+                $subject = $this->getStandardMailSubject(t('New attachment'), $data);
                 break;
             case 'comment_creation':
-                $subject = e('[%s][New comment] %s (#%d)', $data['task']['project_name'], $data['task']['title'], $data['task']['id']);
+                $subject = $this->getStandardMailSubject(t('New comment'), $data);
                 break;
             case 'comment_update':
-                $subject = e('[%s][Comment updated] %s (#%d)', $data['task']['project_name'], $data['task']['title'], $data['task']['id']);
+                $subject = $this->getStandardMailSubject(t('Comment updated'), $data);
                 break;
             case 'subtask_creation':
-                $subject = e('[%s][New subtask] %s (#%d)', $data['task']['project_name'], $data['task']['title'], $data['task']['id']);
+                $subject = $this->getStandardMailSubject(t('New subtask'), $data);
                 break;
             case 'subtask_update':
-                $subject = e('[%s][Subtask updated] %s (#%d)', $data['task']['project_name'], $data['task']['title'], $data['task']['id']);
+                $subject = $this->getStandardMailSubject(t('Subtask updated'), $data);
                 break;
             case 'task_creation':
-                $subject = e('[%s][New task] %s (#%d)', $data['task']['project_name'], $data['task']['title'], $data['task']['id']);
+                $subject = $this->getStandardMailSubject(t('New task'), $data);
                 break;
             case 'task_update':
-                $subject = e('[%s][Task updated] %s (#%d)', $data['task']['project_name'], $data['task']['title'], $data['task']['id']);
+                $subject = $this->getStandardMailSubject(t('Task updated'), $data);
                 break;
             case 'task_close':
-                $subject = e('[%s][Task closed] %s (#%d)', $data['task']['project_name'], $data['task']['title'], $data['task']['id']);
+                $subject = $this->getStandardMailSubject(t('Task closed'), $data);
                 break;
             case 'task_open':
-                $subject = e('[%s][Task opened] %s (#%d)', $data['task']['project_name'], $data['task']['title'], $data['task']['id']);
+                $subject = $this->getStandardMailSubject(t('Task opened'), $data);
                 break;
             case 'task_move_column':
-                $subject = e('[%s][Column Change] %s (#%d)', $data['task']['project_name'], $data['task']['title'], $data['task']['id']);
+                $subject = $this->getStandardMailSubject(t('Column Change'), $data);
                 break;
             case 'task_move_position':
-                $subject = e('[%s][Position Change] %s (#%d)', $data['task']['project_name'], $data['task']['title'], $data['task']['id']);
+                $subject = $this->getStandardMailSubject(t('Position Change'), $data);
                 break;
             case 'task_assignee_change':
-                $subject = e('[%s][Assignee Change] %s (#%d)', $data['task']['project_name'], $data['task']['title'], $data['task']['id']);
+                $subject = $this->getStandardMailSubject(t('Assignee Change'), $data);
                 break;
             case 'task_due':
                 $subject = e('[%s][Due tasks]', $data['project']);
@@ -217,8 +218,10 @@ class Notification extends Base
      */
     public function getMailContent($template, array $data)
     {
-        $tpl = new Template;
-        return $tpl->load('notification/'.$template, $data + array('application_url' => $this->config->get('application_url')));
+        return $this->template->render(
+            'notification/'.$template,
+            $data + array('application_url' => $this->config->get('application_url'))
+        );
     }
 
     /**

@@ -10,6 +10,17 @@ use Model\Project;
 
 class ProjectActivityTest extends Base
 {
+    public function testDecode()
+    {
+        $e = new ProjectActivity($this->container);
+        $input = array('test');
+        $serialized = serialize($input);
+        $json = json_encode($input);
+
+        $this->assertEquals($input, $e->decode($serialized));
+        $this->assertEquals($input, $e->decode($json));
+    }
+
     public function testCreation()
     {
         $e = new ProjectActivity($this->container);
@@ -30,7 +41,7 @@ class ProjectActivityTest extends Base
         $this->assertNotEmpty($events);
         $this->assertTrue(is_array($events));
         $this->assertEquals(2, count($events));
-        $this->assertEquals(time(), $events[0]['date_creation']);
+        $this->assertEquals(time(), $events[0]['date_creation'], '', 1);
         $this->assertEquals(Task::EVENT_UPDATE, $events[0]['event_name']);
         $this->assertEquals(Task::EVENT_CLOSE, $events[1]['event_name']);
     }

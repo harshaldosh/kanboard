@@ -2,9 +2,6 @@
 
 namespace Model;
 
-use Core\Template;
-use Event\ProjectDailySummaryListener;
-
 /**
  * Project daily summary
  *
@@ -22,6 +19,9 @@ class ProjectDailySummary extends Base
 
     /**
      * Update daily totals for the project
+     *
+     * "total" is the number open of tasks in the column
+     * "score" is the sum of tasks score in the column
      *
      * @access public
      * @param  integer    $project_id    Project id
@@ -43,6 +43,7 @@ class ProjectDailySummary extends Base
                     'project_id' => $project_id,
                     'column_id' => $column_id,
                     'total' => 0,
+                    'score' => 0,
                 ));
 
                 $db->table(ProjectDailySummary::TABLE)
@@ -50,10 +51,14 @@ class ProjectDailySummary extends Base
                     ->eq('column_id', $column_id)
                     ->eq('day', $date)
                     ->update(array(
-                        'total' => $db->table(Task::TABLE)
+                        'score' => $db->table(Task::TABLE)
                                       ->eq('project_id', $project_id)
                                       ->eq('column_id', $column_id)
                                       ->eq('is_active', Task::STATUS_OPEN)
+                                      ->sum('score'),
+                        'total' => $db->table(Task::TABLE)
+                                      ->eq('project_id', $project_id)
+                                      ->eq('column_id', $column_id)
                                       ->count()
                     ));
             }
@@ -95,12 +100,39 @@ class ProjectDailySummary extends Base
                             ProjectDailySummary::TABLE.'.column_id',
                             ProjectDailySummary::TABLE.'.day',
                             ProjectDailySummary::TABLE.'.total',
+                            ProjectDailySummary::TABLE.'.score',
                             Board::TABLE.'.title AS column_title'
                         )
                         ->join(Board::TABLE, 'id', 'column_id')
                         ->eq(ProjectDailySummary::TABLE.'.project_id', $project_id)
                         ->gte('day', $from)
                         ->lte('day', $to)
+                        ->asc(ProjectDailySummary::TABLE.'.day')
+                        ->findAll();
+    }
+
+    /**
+     * Get raw metrics for the project within a data range grouped by day
+     *
+     * @access public
+     * @param  integer    $project_id    Project id
+     * @param  string     $from          Start date (ISO format YYYY-MM-DD)
+     * @param  string     $to            End date
+     * @return array
+     */
+    public function getRawMetricsByDay($project_id, $from, $to)
+    {
+        return $this->db->table(ProjectDailySummary::TABLE)
+                        ->columns(
+                            ProjectDailySummary::TABLE.'.day',
+                            'SUM('.ProjectDailySummary::TABLE.'.total) AS total',
+                            'SUM('.ProjectDailySummary::TABLE.'.score) AS score'
+                        )
+                        ->eq(ProjectDailySummary::TABLE.'.project_id', $project_id)
+                        ->gte('day', $from)
+                        ->lte('day', $to)
+                        ->asc(ProjectDailySummary::TABLE.'.day')
+                        ->groupBy(ProjectDailySummary::TABLE.'.day')
                         ->findAll();
     }
 
@@ -156,26 +188,5 @@ class ProjectDailySummary extends Base
         }
 
         return $metrics;
-    }
-
-    /**
-     * Attach events to be able to record the metrics
-     *
-     * @access public
-     */
-    public function attachEvents()
-    {
-        $events = array(
-            Task::EVENT_CREATE,
-            Task::EVENT_CLOSE,
-            Task::EVENT_OPEN,
-            Task::EVENT_MOVE_COLUMN,
-        );
-
-        $listener = new ProjectDailySummaryListener($this->container);
-
-        foreach ($events as $event_name) {
-            $this->event->attach($event_name, $listener);
-        }
     }
 }

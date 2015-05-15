@@ -3,13 +3,13 @@
 namespace Controller;
 
 use Pimple\Container;
-use Core\Tool;
 use Core\Security;
 use Core\Request;
 use Core\Response;
 use Core\Template;
 use Core\Session;
 use Model\LastLogin;
+use Symfony\Component\EventDispatcher\Event;
 
 /**
  * Base controller
@@ -17,6 +17,16 @@ use Model\LastLogin;
  * @package  controller
  * @author   Frederic Guillot
  *
+ * @property \Core\Helper                  $helper
+ * @property \Core\Session                 $session
+ * @property \Core\Template                $template
+ * @property \Core\Paginator               $paginator
+ * @property \Integration\GithubWebhook    $githubWebhook
+ * @property \Integration\GitlabWebhook    $gitlabWebhook
+ * @property \Integration\BitbucketWebhook $bitbucketWebhook
+ * @property \Integration\PostmarkWebhook  $postmarkWebhook
+ * @property \Integration\SendgridWebhook  $sendgridWebhook
+ * @property \Integration\MailgunWebhook   $mailgunWebhook
  * @property \Model\Acl                    $acl
  * @property \Model\Authentication         $authentication
  * @property \Model\Action                 $action
@@ -27,28 +37,43 @@ use Model\LastLogin;
  * @property \Model\Config                 $config
  * @property \Model\DateParser             $dateParser
  * @property \Model\File                   $file
+ * @property \Model\HourlyRate             $hourlyRate
  * @property \Model\LastLogin              $lastLogin
  * @property \Model\Notification           $notification
  * @property \Model\Project                $project
  * @property \Model\ProjectPermission      $projectPermission
+ * @property \Model\ProjectDuplication     $projectDuplication
  * @property \Model\ProjectAnalytic        $projectAnalytic
+ * @property \Model\ProjectActivity        $projectActivity
  * @property \Model\ProjectDailySummary    $projectDailySummary
- * @property \Model\SubTask                $subTask
+ * @property \Model\ProjectIntegration     $projectIntegration
+ * @property \Model\Subtask                $subtask
+ * @property \Model\SubtaskForecast        $subtaskForecast
+ * @property \Model\Swimlane               $swimlane
  * @property \Model\Task                   $task
+ * @property \Model\Link                   $link
  * @property \Model\TaskCreation           $taskCreation
  * @property \Model\TaskModification       $taskModification
  * @property \Model\TaskDuplication        $taskDuplication
  * @property \Model\TaskHistory            $taskHistory
  * @property \Model\TaskExport             $taskExport
  * @property \Model\TaskFinder             $taskFinder
+ * @property \Model\TaskFilter             $taskFilter
  * @property \Model\TaskPosition           $taskPosition
  * @property \Model\TaskPermission         $taskPermission
  * @property \Model\TaskStatus             $taskStatus
+ * @property \Model\Timetable              $timetable
+ * @property \Model\TimetableDay           $timetableDay
+ * @property \Model\TimetableWeek          $timetableWeek
+ * @property \Model\TimetableExtra         $timetableExtra
+ * @property \Model\TimetableOff           $timetableOff
  * @property \Model\TaskValidator          $taskValidator
+ * @property \Model\TaskLink               $taskLink
  * @property \Model\CommentHistory         $commentHistory
  * @property \Model\SubtaskHistory         $subtaskHistory
- * @property \Model\TimeTracking           $timeTracking
+ * @property \Model\SubtaskTimeTracking    $subtaskTimeTracking
  * @property \Model\User                   $user
+ * @property \Model\UserSession            $userSession
  * @property \Model\Webhook                $webhook
  */
 abstract class Base
@@ -70,22 +95,6 @@ abstract class Base
     protected $response;
 
     /**
-     * Template instance
-     *
-     * @accesss protected
-     * @var \Core\Template
-     */
-    protected $template;
-
-    /**
-     * Session instance
-     *
-     * @accesss public
-     * @var \Core\Session
-     */
-    protected $session;
-
-    /**
      * Container instance
      *
      * @access private
@@ -104,8 +113,6 @@ abstract class Base
         $this->container = $container;
         $this->request = new Request;
         $this->response = new Response;
-        $this->session = new Session;
-        $this->template = new Template;
     }
 
     /**
@@ -115,9 +122,15 @@ abstract class Base
      */
     public function __destruct()
     {
-        // foreach ($this->container['db']->getLogMessages() as $message) {
-        //     $this->container['logger']->addDebug($message);
-        // }
+        if (DEBUG) {
+
+            foreach ($this->container['db']->getLogMessages() as $message) {
+                $this->container['logger']->debug($message);
+            }
+
+            $this->container['logger']->debug('SQL_QUERIES={nb}', array('nb' => $this->container['db']->nb_queries));
+            $this->container['logger']->debug('RENDERING={time}', array('time' => microtime(true) - @$_SERVER['REQUEST_TIME_FLOAT']));
+        }
     }
 
     /**
@@ -129,7 +142,29 @@ abstract class Base
      */
     public function __get($name)
     {
-        return Tool::loadModel($this->container, $name);
+        return $this->container[$name];
+    }
+
+    /**
+     * Send HTTP headers
+     *
+     * @access private
+     */
+    private function sendHeaders($action)
+    {
+        // HTTP secure headers
+        $this->response->csp(array('style-src' => "'self' 'unsafe-inline'", 'img-src' => '*'));
+        $this->response->nosniff();
+        $this->response->xss();
+
+        // Allow the public board iframe inclusion
+        if (ENABLE_XFRAME && $action !== 'readonly') {
+            $this->response->xframe();
+        }
+
+        if (ENABLE_HSTS) {
+            $this->response->hsts();
+        }
     }
 
     /**
@@ -141,61 +176,71 @@ abstract class Base
     {
         // Start the session
         $this->session->open(BASE_URL_DIRECTORY);
+        $this->sendHeaders($action);
+        $this->container['dispatcher']->dispatch('session.bootstrap', new Event);
 
-        // HTTP secure headers
-        $this->response->csp(array('style-src' => "'self' 'unsafe-inline'"));
-        $this->response->nosniff();
-        $this->response->xss();
+        if (! $this->acl->isPublicAction($controller, $action)) {
+            $this->handleAuthentication();
+            $this->handle2FA($controller, $action);
+            $this->handleAuthorization($controller, $action);
 
-        // Allow the public board iframe inclusion
-        if ($action !== 'readonly') {
-            $this->response->xframe();
+            $this->session['has_subtask_inprogress'] = $this->subtask->hasSubtaskInProgress($this->userSession->getId());
         }
+    }
 
-        if (ENABLE_HSTS) {
-            $this->response->hsts();
-        }
-
-        $this->config->setupTranslations();
-        $this->config->setupTimezone();
-
-        // Authentication
-        if (! $this->authentication->isAuthenticated($controller, $action)) {
+    /**
+     * Check authentication
+     *
+     * @access public
+     */
+    public function handleAuthentication()
+    {
+        if (! $this->authentication->isAuthenticated()) {
 
             if ($this->request->isAjax()) {
                 $this->response->text('Not Authorized', 401);
             }
 
-            $this->response->redirect('?controller=user&action=login&redirect_query='.urlencode($this->request->getQueryString()));
+            $this->response->redirect($this->helper->url('auth', 'login', array('redirect_query' => urlencode($this->request->getQueryString()))));
         }
-
-        // Check if the user is allowed to see this page
-        if (! $this->acl->isPageAccessAllowed($controller, $action)) {
-            $this->response->redirect('?controller=user&action=forbidden');
-        }
-
-        // Attach events
-        $this->attachEvents();
     }
 
     /**
-     * Attach events
+     * Check 2FA
      *
-     * @access private
+     * @access public
      */
-    private function attachEvents()
+    public function handle2FA($controller, $action)
     {
-        $models = array(
-            'projectActivity', // Order is important
-            'projectDailySummary',
-            'action',
-            'project',
-            'webhook',
-            'notification',
-        );
+        $ignore = ($controller === 'twofactor' && in_array($action, array('code', 'check'))) || ($controller === 'user' && $action === 'logout');
 
-        foreach ($models as $model) {
-            $this->$model->attachEvents();
+        if ($ignore === false && $this->userSession->has2FA() && ! $this->userSession->check2FA()) {
+
+            if ($this->request->isAjax()) {
+                $this->response->text('Not Authorized', 401);
+            }
+
+            $this->response->redirect($this->helper->url('twofactor', 'code'));
+        }
+    }
+
+    /**
+     * Check page access and authorization
+     *
+     * @access public
+     */
+    public function handleAuthorization($controller, $action)
+    {
+        $project_id = $this->request->getIntegerParam('project_id');
+        $task_id = $this->request->getIntegerParam('task_id');
+
+        // Allow urls without "project_id"
+        if ($task_id > 0 && $project_id === 0) {
+            $project_id = $this->taskFinder->getProjectId($task_id);
+        }
+
+        if (! $this->acl->isAllowed($controller, $action, $project_id)) {
+            $this->forbidden();
         }
     }
 
@@ -240,33 +285,6 @@ abstract class Base
     }
 
     /**
-     * Check if the current user have access to the given project
-     *
-     * @access protected
-     * @param  integer   $project_id  Project id
-     */
-    protected function checkProjectPermissions($project_id)
-    {
-        if ($this->acl->isRegularUser() && ! $this->projectPermission->isUserAllowed($project_id, $this->acl->getUserId())) {
-            $this->forbidden();
-        }
-    }
-
-    /**
-     * Check if the current user is owner of the given project
-     *
-     * @access protected
-     * @param  integer   $project_id  Project id
-     */
-    protected function checkProjectOwnerPermissions($project_id)
-    {
-        if (! $this->acl->isAdminUser() &&
-            ! ($this->acl->isRegularUser() && $this->projectPermission->isOwner($project_id, $this->acl->getUserId()))) {
-            $this->forbidden();
-        }
-    }
-
-    /**
      * Redirection when there is no project in the database
      *
      * @access protected
@@ -287,14 +305,10 @@ abstract class Base
      */
     protected function taskLayout($template, array $params)
     {
-        if (isset($params['task']) && $this->taskPermission->canRemoveTask($params['task']) === false) {
-            $params['hide_remove_menu'] = true;
-        }
-
-        $content = $this->template->load($template, $params);
+        $content = $this->template->render($template, $params);
         $params['task_content_for_layout'] = $content;
         $params['title'] = $params['task']['project_name'].' &gt; '.$params['task']['title'];
-        $params['board_selector'] = $this->projectPermission->getAllowedProjects($this->acl->getUserId());
+        $params['board_selector'] = $this->projectPermission->getAllowedProjects($this->userSession->getId());
 
         return $this->template->layout('task/layout', $params);
     }
@@ -309,11 +323,10 @@ abstract class Base
      */
     protected function projectLayout($template, array $params)
     {
-        $content = $this->template->load($template, $params);
+        $content = $this->template->render($template, $params);
         $params['project_content_for_layout'] = $content;
         $params['title'] = $params['project']['name'] === $params['title'] ? $params['title'] : $params['project']['name'].' &gt; '.$params['title'];
-        $params['board_selector'] = $this->projectPermission->getAllowedProjects($this->acl->getUserId());
-        $params['is_owner'] = $this->projectPermission->isOwner($params['project']['id'], $this->acl->getUserId());
+        $params['board_selector'] = $this->projectPermission->getAllowedProjects($this->userSession->getId());
 
         return $this->template->layout('project/layout', $params);
     }
@@ -328,11 +341,9 @@ abstract class Base
     {
         $task = $this->taskFinder->getDetails($this->request->getIntegerParam('task_id'));
 
-        if (! $task) {
+        if (empty($task)) {
             $this->notfound();
         }
-
-        $this->checkProjectPermissions($task['project_id']);
 
         return $task;
     }
@@ -349,32 +360,9 @@ abstract class Base
         $project_id = $this->request->getIntegerParam('project_id', $project_id);
         $project = $this->project->getById($project_id);
 
-        if (! $project) {
+        if (empty($project)) {
             $this->session->flashError(t('Project not found.'));
             $this->response->redirect('?controller=project');
-        }
-
-        $this->checkProjectPermissions($project['id']);
-
-        return $project;
-    }
-
-    /**
-     * Common method to get a project with administration rights
-     *
-     * @access protected
-     * @return array
-     */
-    protected function getProjectManagement()
-    {
-        $project = $this->project->getById($this->request->getIntegerParam('project_id'));
-
-        if (! $project) {
-            $this->notfound();
-        }
-
-        if ($this->acl->isRegularUser() && ! $this->projectPermission->adminAllowed($project['id'], $this->acl->getUserId())) {
-            $this->forbidden();
         }
 
         return $project;

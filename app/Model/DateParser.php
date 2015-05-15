@@ -13,6 +13,47 @@ use DateTime;
 class DateParser extends Base
 {
     /**
+     * Return true if the date is within the date range
+     *
+     * @access public
+     * @param  DateTime  $date
+     * @param  DateTime  $start
+     * @param  DateTime  $end
+     * @return boolean
+     */
+    public function withinDateRange(DateTime $date, DateTime $start, DateTime $end)
+    {
+        return $date >= $start && $date <= $end;
+    }
+
+    /**
+     * Get the total number of hours between 2 datetime objects
+     * Minutes are rounded to the nearest quarter
+     *
+     * @access public
+     * @param  DateTime $d1
+     * @param  DateTime $d2
+     * @return float
+     */
+    public function getHours(DateTime $d1, DateTime $d2)
+    {
+        $seconds = $this->getRoundedSeconds(abs($d1->getTimestamp() - $d2->getTimestamp()));
+        return round($seconds / 3600, 2);
+    }
+
+    /**
+     * Round the timestamp to the nearest quarter
+     *
+     * @access public
+     * @param  integer    $seconds   Timestamp
+     * @return integer
+     */
+    public function getRoundedSeconds($seconds)
+    {
+        return (int) round($seconds / (15 * 60)) * (15 * 60);
+    }
+
+    /**
      * Return a timestamp if the given date format is correct otherwise return 0
      *
      * @access public
@@ -60,7 +101,7 @@ class DateParser extends Base
      * Return the list of supported date formats (for the parser)
      *
      * @access public
-     * @return array
+     * @return string[]
      */
     public function getDateFormats()
     {
@@ -87,15 +128,27 @@ class DateParser extends Base
     }
 
     /**
-     * For a given timestamp, reset the date to midnight
+     * Remove the time from a timestamp
      *
      * @access public
      * @param  integer    $timestamp    Timestamp
      * @return integer
      */
-    public function resetDateToMidnight($timestamp)
+    public function removeTimeFromTimestamp($timestamp)
     {
         return mktime(0, 0, 0, date('m', $timestamp), date('d', $timestamp), date('Y', $timestamp));
+    }
+
+    /**
+     * Get a timetstamp from an ISO date format
+     *
+     * @access public
+     * @param  string   $date   Date format
+     * @return integer
+     */
+    public function getTimestampFromIsoFormat($date)
+    {
+        return $this->removeTimeFromTimestamp(strtotime($date));
     }
 
     /**
@@ -103,7 +156,7 @@ class DateParser extends Base
      *
      * @access public
      * @param  array    $values   Database values
-     * @param  array    $fields   Date fields
+     * @param  string[] $fields   Date fields
      * @param  string   $format   Date format
      */
     public function format(array &$values, array $fields, $format = '')
@@ -128,14 +181,14 @@ class DateParser extends Base
      *
      * @access public
      * @param  array    $values   Database values
-     * @param  array    $fields   Date fields
+     * @param  string[] $fields   Date fields
      */
     public function convert(array &$values, array $fields)
     {
         foreach ($fields as $field) {
 
             if (! empty($values[$field]) && ! is_numeric($values[$field])) {
-                $values[$field] = $this->getTimestamp($values[$field]);
+                $values[$field] = $this->removeTimeFromTimestamp($this->getTimestamp($values[$field]));
             }
         }
     }

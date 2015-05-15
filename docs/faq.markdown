@@ -21,12 +21,22 @@ Kanboard have been tested on the following devices:
 - Mozilla Firefox
 - Safari
 - Google Chrome
-- Internet Explorer > 10
+- Internet Explorer 11
 
 ### Tablets
 
 - iPad (iOS)
-- Nexus 7 (Android)
+- Nexus 7 (Android/Chrome)
+
+
+I get a blank page after installing or upgrading Kanboard
+---------------------------------------------------------
+
+- Check if you have installed all requirements on your server
+- Check if the files have the correct permissions
+- If you use php-fpm and opcode caching, reload the process to be sure to clear the cache
+- Enable PHP error logging in your php.ini
+- Check the PHP and Apache error logs you should see the exact error
 
 
 Known issues with eAccelerator
@@ -45,13 +55,17 @@ The project [eAccelerator seems dead and not updated since 2012](https://github.
 We recommend to switch to the last version of PHP because it's bundled with [OPcache](http://php.net/manual/en/intro.opcache.php).
 
 
-Why the minimum requirement is PHP 5.3.7?
+Why the minimum requirement is PHP 5.3.3?
 -----------------------------------------
 
 Kanboard use the function `password_hash()` to crypt passwords but it's available only for PHP >= 5.5.
 
 However, there is a backport for [older versions of PHP](https://github.com/ircmaxell/password_compat#requirements).
 This library require at least PHP 5.3.7 to work correctly.
+
+Apparently, Centos and Debian backports security patches so PHP 5.3.3 should be ok.
+
+Kanboard v1.0.10 and v1.0.11 requires at least PHP 5.3.7 but this change has been reverted to be compatible with PHP 5.3.3 with Kanboard >= v1.0.12
 
 
 How to test Kanboard with the PHP built-in web server?
@@ -79,3 +93,17 @@ More information here:
 
 - [Wunderlist](http://www.wunderlist.com/)
 - <https://github.com/EpocDotFr/WunderlistToKanboard>
+
+
+How to install Kanboard on Yunohost?
+------------------------------------
+
+[YunoHost](https://yunohost.org/) is a server operating system aiming to make self-hosting accessible to everyone.
+
+There is a [package to install Kanboard on Yunohost easily](https://github.com/mbugeia/kanboard_ynh).
+
+
+Are there some tutorials about Kanboard in other languages?
+-----------------------------------------------------------
+
+- [German article series about Kanboard](http://demaya.de/wp/2014/07/kanboard-eine-jira-alternative-im-detail-installation/)

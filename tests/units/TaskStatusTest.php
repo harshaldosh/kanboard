@@ -33,16 +33,17 @@ class TaskStatusTest extends Base
 
         // We close the task
 
+        $this->container['dispatcher']->addListener(Task::EVENT_CLOSE, array($this, 'onTaskClose'));
+        $this->container['dispatcher']->addListener(Task::EVENT_OPEN, array($this, 'onTaskOpen'));
+
         $this->assertTrue($ts->close(1));
         $this->assertTrue($ts->isClosed(1));
 
         $task = $tf->getById(1);
         $this->assertNotEmpty($task);
         $this->assertEquals(Task::STATUS_CLOSED, $task['is_active']);
-        $this->assertEquals(time(), $task['date_completed']);
-        $this->assertEquals(time(), $task['date_modification']);
-
-        $this->assertTrue($this->container['event']->isEventTriggered(Task::EVENT_CLOSE));
+        $this->assertEquals(time(), $task['date_completed'], 'Bad completion timestamp', 1);
+        $this->assertEquals(time(), $task['date_modification'], 'Bad modification timestamp', 1);
 
         // We open the task again
 
@@ -53,8 +54,24 @@ class TaskStatusTest extends Base
         $this->assertNotEmpty($task);
         $this->assertEquals(Task::STATUS_OPEN, $task['is_active']);
         $this->assertEquals(0, $task['date_completed']);
-        $this->assertEquals(time(), $task['date_modification']);
+        $this->assertEquals(time(), $task['date_modification'], 1);
 
-        $this->assertTrue($this->container['event']->isEventTriggered(Task::EVENT_OPEN));
+        $called = $this->container['dispatcher']->getCalledListeners();
+        $this->assertArrayHasKey('task.close.TaskStatusTest::onTaskClose', $called);
+        $this->assertArrayHasKey('task.open.TaskStatusTest::onTaskOpen', $called);
+    }
+
+    public function onTaskOpen($event)
+    {
+        $this->assertInstanceOf('Event\TaskEvent', $event);
+        $this->assertArrayHasKey('task_id', $event);
+        $this->assertNotEmpty($event['task_id']);
+    }
+
+    public function onTaskClose($event)
+    {
+        $this->assertInstanceOf('Event\TaskEvent', $event);
+        $this->assertArrayHasKey('task_id', $event);
+        $this->assertNotEmpty($event['task_id']);
     }
 }

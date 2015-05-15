@@ -2,8 +2,6 @@
 
 namespace Core;
 
-use Pimple\Container;
-
 /**
  * Tool class
  *
@@ -35,21 +33,22 @@ class Tool
     }
 
     /**
-     * Load and register a model
+     * Get the mailbox hash from an email address
      *
      * @static
      * @access public
-     * @param  Pimple\Container    $container     Container instance
-     * @param  string              $name          Model name
-     * @return mixed
+     * @param  string  $email
+     * @return string
      */
-    public static function loadModel(Container $container, $name)
+    public static function getMailboxHash($email)
     {
-        if (! isset($container[$name])) {
-            $class = '\Model\\'.ucfirst($name);
-            $container[$name] = new $class($container);
+        if (! strpos($email, '@') || ! strpos($email, '+')) {
+            return '';
         }
 
-        return $container[$name];
+        list($local_part,) = explode('@', $email);
+        list(,$identifier) = explode('+', $local_part);
+
+        return $identifier;
     }
 }
